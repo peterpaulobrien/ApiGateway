@@ -6,6 +6,7 @@
 
 import os
 import requests
+import socket
 from datetime import datetime
 from flask import Flask, request, json, make_response
 from flask_api import status
@@ -16,9 +17,10 @@ from waitress import serve
 app = Flask(__name__)
 
 # Set Mongo URI, Database name and Port
-mongo_uri = 'mongodb://127.0.0.1:27017/api'
+hostname = socket.gethostname()
+mongo_uri = 'mongodb://' + hostname + ':27017/api'
 db_name = 'api'
-port = int(os.getenv("SERVER_PORT", 9099))
+server_port = int(os.getenv("SERVER_PORT", 9099))
 
 
 def increment_mongo_counters(counters):
@@ -63,70 +65,28 @@ def write_metadata_to_mongo(request, destination_service):
         print(errc)
 
 
-@app.route('/api/service1')
+@app.route('/api/service1', endpoint="service1")
+@app.route('/api/service2', endpoint="service2")
+@app.route('/api/service3', endpoint="service3")
 def service1():
     """
     API endpoint to route requests to Service1
     :return: Response from Service1
     """
-    print("Routing to service1 on port 9091")
+    port = "9091" if request.endpoint == "service1" else "9092" if request.endpoint == "service2" else "9093"
+    print("Routing to " + request.endpoint + " on port " + port)
+    url = 'http://' + hostname + ':' + port + '/api/test'
     try:
         write_metadata_to_mongo(request, request.endpoint)
         try:
-            response = requests.get('http://127.0.0.1:9091/api/test', headers=request.headers,
+            response = requests.get(url, headers=request.headers,
                                     params=json.dumps(request.values.dicts[0]), data=request.data)
             increment_mongo_counters({"total": 1, "successful": 1})
             return make_response(response.text, response.status_code)
         except requests.exceptions.ConnectionError:
             print("service1 is down")
             increment_mongo_counters({"total": 1, "failed": 1})
-            return make_response("service1 is down", status.HTTP_503_SERVICE_UNAVAILABLE)
-    except requests.exceptions.RequestException as err:
-        increment_mongo_counters({"total": 1, "failed": 1})
-        print(err)
-
-
-@app.route('/api/service2')
-def service2():
-    """
-    API endpoint to route requests to Service2
-    :return: Response from Service2
-    """
-    print("Routing to service2 on port 9092")
-    try:
-        write_metadata_to_mongo(request, request.endpoint)
-        try:
-            response = requests.get('http://127.0.0.1:9092/api/test', headers=request.headers,
-                                    params=json.dumps(request.values.dicts[0]), data=request.data)
-            increment_mongo_counters({"total": 1, "successful": 1})
-            return make_response(response.text, response.status_code)
-        except requests.exceptions.ConnectionError:
-            print("service2 is down")
-            increment_mongo_counters({"total": 1, "failed": 1})
-            return make_response("service2 is down", status.HTTP_503_SERVICE_UNAVAILABLE)
-    except requests.exceptions.RequestException as err:
-        increment_mongo_counters({"total": 1, "failed": 1})
-        print(err)
-
-
-@app.route('/api/service3')
-def service3():
-    """
-    API endpoint to route requests to Service3
-    :return: Response from Service3
-    """
-    print("Routing to service3 on port 9093")
-    try:
-        write_metadata_to_mongo(request, request.endpoint)
-        try:
-            response = requests.get('http://127.0.0.1:9093/api/test', headers=request.headers,
-                                    params=json.dumps(request.values.dicts[0]), data=request.data)
-            increment_mongo_counters({"total": 1, "successful": 1})
-            return make_response(response.text, response.status_code)
-        except requests.exceptions.ConnectionError:
-            print("service3 is down")
-            increment_mongo_counters({"total": 1, "failed": 1})
-            return make_response("service3 is down", status.HTTP_503_SERVICE_UNAVAILABLE)
+            return make_response(request.endpoint + " is down", status.HTTP_503_SERVICE_UNAVAILABLE)
     except requests.exceptions.RequestException as err:
         increment_mongo_counters({"total": 1, "failed": 1})
         print(err)
@@ -140,35 +100,19 @@ def grouped():
     """
     print("Routing to all services on all ports")
     failed = 0
-    successful = 0
     group_response = ""
+    services = ["service1", "service2", "service3"]
     try:
-        write_metadata_to_mongo(request, ["service1", "service2", "service3"])
-        try:
-            response1 = requests.get('http://127.0.0.1:9091/api/test', headers=request.headers,
+        write_metadata_to_mongo(request, services)
+        for service in services:
+            try:
+                url = 'http://' + hostname + ':' + server_port + '/api/' + service
+                response1 = requests.get(url, headers=request.headers,
                                  params=json.dumps(request.values.dicts[0]), data=request.data)
-            group_response = response1.text
-            successful += 1
-        except requests.exceptions.ConnectionError:
-            print("service1 is down")
-            failed += 1
-        try:
-            response2 = requests.get('http://127.0.0.1:9092/api/test', headers=request.headers,
-                                 params=json.dumps(request.values.dicts[0]), data=request.data)
-            group_response = group_response + response2.text
-            successful += 1
-        except requests.exceptions.ConnectionError:
-            print("service2 is down")
-            failed += 1
-        try:
-            response3 = requests.get('http://127.0.0.1:9093/api/test', headers=request.headers,
-                                 params=json.dumps(request.values.dicts[0]), data=request.data)
-            group_response = group_response + response3.text
-            successful += 1
-        except requests.exceptions.ConnectionError:
-            print("service3 is down")
-            failed += 1
-        increment_mongo_counters({"total": 3, "successful": successful, "failed": failed})
+                group_response = group_response + response1.text
+            except requests.exceptions.ConnectionError:
+                print(service + " is down")
+                failed += 1
         if failed == 3:
             return make_response("All services are down", status.HTTP_503_SERVICE_UNAVAILABLE)
         else:
@@ -181,10 +125,10 @@ def grouped():
 if __name__ == '__main__':
     #: Run the app, with the chosen port number
     # Debug/Development
-    #app.run(host='0.0.0.0', port=port)
+    #app.run(host='0.0.0.0', port=server_port)
     # Production
     try:
-        serve(app, host='0.0.0.0', port=port)
+        serve(app, host=hostname, port=server_port)
     except RuntimeError:
         print("Could not start Webserver")
 
