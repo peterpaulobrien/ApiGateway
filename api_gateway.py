@@ -68,10 +68,10 @@ def write_metadata_to_mongo(request, destination_service):
 @app.route('/api/service1', endpoint="service1")
 @app.route('/api/service2', endpoint="service2")
 @app.route('/api/service3', endpoint="service3")
-def service1():
+def service():
     """
-    API endpoint to route requests to Service1
-    :return: Response from Service1
+    API endpoint to route requests to appropriate service
+    :return: Response from Service
     """
     port = "9091" if request.endpoint == "service1" else "9092" if request.endpoint == "service2" else "9093"
     print("Routing to " + request.endpoint + " on port " + port)
